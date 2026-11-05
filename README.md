@@ -34,7 +34,10 @@ The checker is built in layers. Each layer adds evidence before a final verdict 
   - Learns phishing patterns from the domain name (length, randomness, hyphens, digits, risky endings, words like `login` or `verify`)
   - Calls a link a Scam only above a high-confidence threshold (≥ 99% precision on validation data)
   - Never overrides an official domain, and can't call one of the world's 10,000 most popular sites a scam on its own (free-hosting platforms excepted)
-- [ ] **Layer 4: AI explanation** (plain-language verdict in Arabic and English)
+- [x] **Layer 4: AI explanation**. Google Gemini turns the evidence into a short, plain-language explanation in **English and Arabic**:
+  - **The AI can't change the verdict.** It comes from Layers 1–3, and the code ignores any verdict in the AI's reply.
+  - **Prompt-injection safe:** the link is defanged and passed as untrusted data, and the AI is told to ignore instructions inside it.
+  - **Always works:** if Gemini is busy, retired or unreachable, the tool retries, switches to a backup model, and finally falls back to built-in explanations in both languages.
 - [ ] **Website**: paste a link, get the verdict
 - [ ] **Layer 5: Sandboxed page analysis** (screenshot, forms and content in an isolated browser)
 
@@ -138,11 +141,29 @@ python build_popular_list.py            # refresh popular_domains.txt from Tranc
 python train_model.py --features host   # or --features full to reproduce the shortcut problem
 ```
 
-Example output:
+### Layer 4 setup (AI explanation)
+
+Add a free Gemini key from [Google AI Studio](https://aistudio.google.com/apikey) to `.env` as `GEMINI_API_KEY=...`, then:
+```bash
+python link_checker.py --intel --ml --explain "hxxps://gulfairsz[.]bond/air"
+python link_checker.py --explain --lang ar "https://suspicious-link.com"   # Arabic only
+python check_gemini.py                                                    # see which Gemini models your key can use
 ```
-⛔ SCAM       hxxps://bahrain.bh.secure-pay[.]com/fines
-   host: bahrain.bh.secure-pay.com
-   - Contains the official name 'bahrain.bh' but the real domain is 'secure-pay.com'.
+
+Example output (all layers):
+```
+⛔ SCAM       hxxps://gulfairsz[.]bond/air
+   - Google Safe Browsing lists this link as dangerous (social engineering).
+   - VirusTotal: 2 of 98 security vendors flag it as malicious.
+   - Uses the name 'Gulf Air' but the real Gulf Air site is gulfair.com.
+   - Uses the '.bond' ending, which is common in scam sites.
+
+   ⛔ Scam: This link is a scam impersonating Gulf Air
+      This website address is fake and uses the name 'Gulf Air' to trick you. Security services
+      have flagged it as dangerous and it does not match the official gulfair.com website.
+      • Do not open the link or enter any personal or payment details.
+      • If you have shared bank details, contact your bank immediately.
+      • Report the scam to the Anti-Cybercrime Directorate by calling 992.
 ```
 
 ## Project files
@@ -157,6 +178,8 @@ Example output:
 | `phishing_model.joblib` | The trained model |
 | `build_popular_list.py`, `popular_domains.txt` | Top 10,000 sites from the Tranco list |
 | `model_report.md` | Training results, feature importance and limitations |
+| `explain.py` | Layer 4: AI explanation with Gemini (English and Arabic), with fallbacks |
+| `check_gemini.py` | Diagnostic: lists the Gemini models your key can use and tests them |
 | `bahrain_official_domains_allowlist.xlsx` | Verified official domains, matching rules and sources |
 | `evaluate.py` | Runs the checker on live phishing links and official sites and saves the results |
 | `evaluation_layer*_2026-11-05.xlsx` | Evaluation results for each stage (links are defanged) |
@@ -167,7 +190,11 @@ All example and test links in this repository are **defanged** (`hxxps://`, `[.]
 
 ## Tech stack
 
-Python · scikit-learn · pandas · NumPy · tldextract · python-whois · openpyxl · Google Safe Browsing API · VirusTotal API
+Python · Google Gemini API · scikit-learn · pandas · NumPy · tldextract · python-whois · openpyxl · Google Safe Browsing API · VirusTotal API
+
+## Notes
+
+- The reporting hotline (992, Anti-Cybercrime Directorate) comes from [public announcements](https://newsofbahrain.com/bahrain/69593.html); re-check it from time to time.
 
 ## Data credits
 

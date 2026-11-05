@@ -13,7 +13,9 @@ Usage:
     python link_checker.py --whois "https://..."     # also check domain age
     python link_checker.py --intel "https://..."     # Layer 2: threat intelligence
     python link_checker.py --ml "https://..."        # Layer 3: trained ML model
-    python link_checker.py --intel --ml "https://..." # everything
+    python link_checker.py --intel --ml "https://..." # layers 1-3
+    python link_checker.py --intel --ml --explain "https://..."   # + AI explanation (EN + AR)
+    python link_checker.py --explain --lang ar "https://..."      # Arabic only
 
 Requirements:
     pip install openpyxl tldextract python-whois
@@ -432,6 +434,9 @@ def main():
     p.add_argument("--file", help="text file with one URL per line")
     p.add_argument("--demo", action="store_true", help="run built-in test cases")
     p.add_argument("--whois", action="store_true", help="also check domain age (needs internet)")
+    p.add_argument("--explain", action="store_true",
+                   help="Layer 4: plain-language explanation by AI (needs GEMINI_API_KEY in .env)")
+    p.add_argument("--lang", choices=["en", "ar", "both"], default="both", help="language for --explain")
     p.add_argument("--ml", action="store_true",
                    help="Layer 3: add the trained ML model's score (needs phishing_model.joblib)")
     p.add_argument("--intel", action="store_true",
@@ -486,8 +491,15 @@ def main():
         for r in results:
             url_features.apply_ml(r)
 
+    if args.explain:
+        import explain
+        import threat_intel
+        keys = threat_intel.load_keys()
+
     for r in results:
         print_result(r)
+        if args.explain:
+            explain.print_explanation(explain.explain(r, keys), args.lang)
 
 
 if __name__ == "__main__":
