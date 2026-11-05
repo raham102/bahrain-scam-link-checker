@@ -1,0 +1,3 @@
+openpyxl
+tldextract
+python-whois
