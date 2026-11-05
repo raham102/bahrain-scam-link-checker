@@ -5,6 +5,8 @@ Evaluate link_checker.py on real phishing links + known safe links.
     python evaluate.py                      # download the OpenPhish feed and test
     python evaluate.py --limit 100          # only test the first 100 phishing links
     python evaluate.py --feed-file feed.txt # use a feed you already downloaded
+    python evaluate.py --intel              # add Layer 2 (Safe Browsing on all, VirusTotal on 20)
+    python evaluate.py --intel --vt-limit 60  # VirusTotal on 60 links (~15 min)
 
 Output: evaluation_results.xlsx  (sheets: Summary, Results)
 
@@ -78,6 +80,9 @@ def main():
     p.add_argument("--feed-file", help="local feed file instead of downloading")
     p.add_argument("--limit", type=int, default=0, help="max phishing links to test (0 = all)")
     p.add_argument("--out", default="evaluation_results.xlsx")
+    p.add_argument("--intel", action="store_true", help="also run Layer 2 (Safe Browsing + VirusTotal)")
+    p.add_argument("--vt-limit", type=int, default=20,
+                   help="max links to send to VirusTotal (free tier ~15 s each; default 20)")
     args = p.parse_args()
 
     allowlist = load_allowlist()
@@ -85,16 +90,36 @@ def main():
     if args.limit:
         phishing = phishing[: args.limit]
 
-    rows = []
-    for url in phishing:
-        r = check_url(url, allowlist)
-        rows.append(("Phishing (OpenPhish)", url, r.host, r.verdict, "; ".join(r.reasons)))
-    for url in KNOWN_SAFE:
-        r = check_url(url, allowlist)
-        rows.append(("Safe (official)", url, r.host, r.verdict, "; ".join(r.reasons)))
+    labelled = [("Phishing (OpenPhish)", u) for u in phishing] + [("Safe (official)", u) for u in KNOWN_SAFE]
+    results = [(label, url, check_url(url, allowlist)) for label, url in labelled]
+    layer1 = {url: r.verdict for _, url, r in results}
 
-    phish_counts = Counter(v for label, _, _, v, _ in rows if label.startswith("Phishing"))
-    safe_counts = Counter(v for label, _, _, v, _ in rows if label.startswith("Safe"))
+    if args.intel:
+        import threat_intel
+        keys = threat_intel.load_keys()
+        if not keys:
+            raise SystemExit("No API keys found - create a .env file (see .env.example).")
+        todo = [url for _, url, r in results if r.verdict != SAFE]
+        print(f"Google Safe Browsing: checking {len(todo)} links...")
+        intel = threat_intel.check_many(todo, {"GSB_API_KEY": keys.get("GSB_API_KEY")})
+        if keys.get("VT_API_KEY") and args.vt_limit:
+            vt_urls = todo[: args.vt_limit]
+            print(f"VirusTotal: checking {len(vt_urls)} links (~{len(vt_urls) * 15 // 60 + 1} min)...")
+            vt = threat_intel.check_many(vt_urls, {"VT_API_KEY": keys["VT_API_KEY"]},
+                                         progress=lambda i, n, u: print(f"  {i}/{n}", end="\r"))
+            for u, res in vt.items():
+                intel[u].vt_stats = res.vt_stats
+                intel[u].checked += res.checked
+                intel[u].errors += res.errors
+            print()
+        for _, url, r in results:
+            if url in intel:
+                threat_intel.apply_intel(r, intel[url])
+
+    rows = [(label, url, r.host, r.verdict, "; ".join(r.reasons), layer1[url]) for label, url, r in results]
+
+    phish_counts = Counter(r[3] for r in rows if r[0].startswith("Phishing"))
+    safe_counts = Counter(r[3] for r in rows if r[0].startswith("Safe"))
     n_phish, n_safe = sum(phish_counts.values()), sum(safe_counts.values())
 
     # ---- console summary ----
@@ -109,13 +134,18 @@ def main():
     wrongly_flagged = [r for r in rows if r[0].startswith("Safe") and r[3] != SAFE]
     print(f"\nPhishing links wrongly marked SAFE: {len(missed)}   <- most important, should be 0")
     print(f"Official links NOT marked SAFE:     {len(wrongly_flagged)}")
+    if args.intel:
+        upgraded = sum(1 for r in rows if r[0].startswith("Phishing") and r[5] != SCAM and r[3] == SCAM)
+        print(f"Phishing links upgraded to SCAM by Layer 2: {upgraded}")
 
     # ---- spreadsheet ----
     wb = Workbook()
     s = wb.active
     s.title = "Summary"
-    s.append(["Evaluation of Layer 1 (domain checks)"])
-    s.append([f"Run: {datetime.now():%Y-%m-%d %H:%M}   Source: OpenPhish public feed"])
+    title = "Layer 1 + Layer 2 (domain checks + threat intel)" if args.intel else "Layer 1 (domain checks)"
+    s.append([f"Evaluation of {title}"])
+    vt_note = f"   VirusTotal: first {args.vt_limit} non-official links" if args.intel else ""
+    s.append([f"Run: {datetime.now():%Y-%m-%d %H:%M}   Source: OpenPhish public feed{vt_note}"])
     s.append([])
     s.append(["Group", "Verdict", "Count", "Share"])
     first = s.max_row + 1
@@ -130,8 +160,12 @@ def main():
     s.append([])
     s.append(["Phishing links wrongly marked SAFE (goal: 0)", None,
               '=COUNTIFS(Results!A:A,"Phishing (OpenPhish)",Results!D:D,"SAFE")'])
-    s.append(["Note: Layer 1 only detects impersonation of Bahrain domains. Global phishing "
-              "links (Netflix, Outlook...) are expected to be SUSPICIOUS; Layer 2 will classify them."])
+    if args.intel:
+        s.append(["Phishing links upgraded to SCAM by Layer 2", None,
+                  '=COUNTIFS(Results!A:A,"Phishing (OpenPhish)",Results!D:D,"SCAM",Results!F:F,"<>SCAM")'])
+    else:
+        s.append(["Note: Layer 1 only detects impersonation of Bahrain domains. Global phishing "
+                  "links (Netflix, Outlook...) are expected to be SUSPICIOUS; Layer 2 will classify them."])
     s["A1"].font = Font(name="Arial", bold=True, size=14)
     for c in s[4]:
         c.font = Font(name="Arial", bold=True, color="FFFFFF")
@@ -140,15 +174,15 @@ def main():
     s.column_dimensions["B"].width = 14
 
     res = wb.create_sheet("Results")
-    res.append(["Group", "URL (defanged)", "Host", "Verdict", "Reasons"])
+    res.append(["Group", "URL (defanged)", "Host", "Final verdict", "Reasons", "Layer 1 verdict"])
     fills = {SAFE: "D1FADF", SUSPICIOUS: "FEF0C7", SCAM: "FEE4E2"}
-    for label, url, host, verdict, reasons in rows:
-        res.append([label, defang(url), host, verdict, reasons])
+    for label, url, host, verdict, reasons, l1 in rows:
+        res.append([label, defang(url), host, verdict, reasons, l1])
         res.cell(res.max_row, 4).fill = PatternFill("solid", fgColor=fills[verdict])
     for c in res[1]:
         c.font = Font(name="Arial", bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="1F3A5F")
-    for col, w in zip("ABCDE", [22, 70, 40, 13, 90]):
+    for col, w in zip("ABCDEF", [22, 70, 40, 14, 90, 15]):
         res.column_dimensions[col].width = w
     for row in res.iter_rows(min_row=2):
         for c in row:

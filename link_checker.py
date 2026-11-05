@@ -11,6 +11,7 @@ Usage:
     python link_checker.py --file links.txt          # one URL per line
     python link_checker.py --demo                    # run built-in test cases
     python link_checker.py --whois "https://..."     # also check domain age
+    python link_checker.py --intel "https://..."     # Layer 2: threat intelligence
 
 Requirements:
     pip install openpyxl tldextract python-whois
@@ -312,7 +313,7 @@ def check_url(url: str, allowlist: set[str], use_whois: bool = False) -> Result:
         res.reasons = warn_signals + res.reasons
         if not warn_signals:
             res.reasons.insert(0, "Not an official domain. No impersonation signs found, "
-                                  "but it needs the next checks (threat intel, page analysis).")
+                                  "but it needs further checks (threat intel, page analysis).")
     return res
 
 
@@ -356,6 +357,8 @@ def main():
     p.add_argument("--file", help="text file with one URL per line")
     p.add_argument("--demo", action="store_true", help="run built-in test cases")
     p.add_argument("--whois", action="store_true", help="also check domain age (needs internet)")
+    p.add_argument("--intel", action="store_true",
+                   help="Layer 2: check Google Safe Browsing + VirusTotal (needs .env with API keys)")
     p.add_argument("--allowlist", default=str(ALLOWLIST_FILE), help="path to the allowlist .xlsx")
     args = p.parse_args()
 
@@ -381,8 +384,28 @@ def main():
     if not urls:
         p.print_help()
         sys.exit(1)
-    for url in urls:
-        print_result(check_url(url, allowlist, args.whois))
+
+    results = [check_url(url, allowlist, args.whois) for url in urls]
+
+    if args.intel:
+        import threat_intel
+        keys = threat_intel.load_keys()
+        if not keys:
+            print("No API keys found. Create a .env file (see .env.example).")
+        else:
+            # Official domains are already SAFE - only look up the others
+            todo = [r for r in results if r.verdict != SAFE]
+            real = {r.url: refang(r.url) if "://" in refang(r.url) else "http://" + refang(r.url)
+                    for r in todo}
+            if todo and keys.get("VT_API_KEY") and len(todo) > 1:
+                print(f"Checking {len(todo)} link(s) with VirusTotal "
+                      f"(free tier: ~15 s per link, about {len(todo) * 15 // 60 + 1} min)...")
+            intel = threat_intel.check_many(list(real.values()), keys)
+            for r in todo:
+                threat_intel.apply_intel(r, intel[real[r.url]])
+
+    for r in results:
+        print_result(r)
 
 
 if __name__ == "__main__":
