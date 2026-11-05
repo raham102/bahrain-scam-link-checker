@@ -1,5 +1,8 @@
 # Bahrain Scam Link Checker
 
+**Try it live: [bahrain-scam-link-checker.onrender.com](https://bahrain-scam-link-checker.onrender.com)** (English and Arabic)
+<sub>Hosted on a free plan: if nobody has used it for 15 minutes, the first check takes about a minute while the server wakes up.</sub>
+
 A tool that checks whether a link is a real Bahrain government or payment website, or a scam pretending to be one, and returns one of three verdicts:
 
 | Verdict | Meaning |
@@ -38,7 +41,11 @@ The checker is built in layers. Each layer adds evidence before a final verdict 
   - **The AI can't change the verdict.** It comes from Layers 1–3, and the code ignores any verdict in the AI's reply.
   - **Prompt-injection safe:** the link is defanged and passed as untrusted data, and the AI is told to ignore instructions inside it.
   - **Always works:** if Gemini is busy, retired or unreachable, the tool retries, switches to a backup model, and finally falls back to built-in explanations in both languages.
-- [ ] **Website**: paste a link, get the verdict
+- [x] **Website**: paste a link or a whole SMS and get the verdict, in English or Arabic ([live](https://bahrain-scam-link-checker.onrender.com))
+  - FastAPI backend (`app.py`, `service.py`) with interactive API docs at [`/docs`](https://bahrain-scam-link-checker.onrender.com/docs)
+  - Finds up to 3 links inside a pasted message (English or Arabic text), worst verdict first
+  - Rate limit of 10 checks a minute per visitor and a 30-minute result cache, to protect the free API quotas
+  - Fully right-to-left Arabic version; the link is never opened by the site
 - [ ] **Layer 5: Sandboxed page analysis** (screenshot, forms and content in an isolated browser)
 
 ## Evaluation
@@ -96,6 +103,13 @@ Internal test set (domain-only Random Forest, 32,928 URLs from unseen domains): 
 - Phishing patterns change, so the model should be retrained on fresh data regularly.
 
 ## Getting started
+
+To run the website on your own computer:
+```bash
+python -m uvicorn app:app --reload     # then open http://127.0.0.1:8000
+```
+
+To use the command-line checker:
 
 ```bash
 git clone https://github.com/rahma102/bahrain-scam-link-checker.git
@@ -178,6 +192,7 @@ Example output (all layers):
 | `phishing_model.joblib` | The trained model |
 | `build_popular_list.py`, `popular_domains.txt` | Top 10,000 sites from the Tranco list |
 | `model_report.md` | Training results, feature importance and limitations |
+| `app.py`, `service.py`, `static/index.html` | The website: FastAPI server, checking service and bilingual page |
 | `explain.py` | Layer 4: AI explanation with Gemini (English and Arabic), with fallbacks |
 | `check_gemini.py` | Diagnostic: lists the Gemini models your key can use and tests them |
 | `bahrain_official_domains_allowlist.xlsx` | Verified official domains, matching rules and sources |
@@ -190,7 +205,7 @@ All example and test links in this repository are **defanged** (`hxxps://`, `[.]
 
 ## Tech stack
 
-Python · Google Gemini API · scikit-learn · pandas · NumPy · tldextract · python-whois · openpyxl · Google Safe Browsing API · VirusTotal API
+Python · FastAPI · Google Gemini API · scikit-learn · pandas · NumPy · tldextract · python-whois · openpyxl · Google Safe Browsing API · VirusTotal API
 
 ## Notes
 
