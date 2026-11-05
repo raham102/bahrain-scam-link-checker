@@ -1,4 +1,5 @@
-.venv/
+.venv*/
 .env
 __pycache__/
 .vscode/
+PhiUSIIL_Phishing_URL_Dataset.csv

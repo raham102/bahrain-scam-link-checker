@@ -7,6 +7,8 @@ Evaluate link_checker.py on real phishing links + known safe links.
     python evaluate.py --feed-file feed.txt # use a feed you already downloaded
     python evaluate.py --intel              # add Layer 2 (Safe Browsing on all, VirusTotal on 20)
     python evaluate.py --intel --vt-limit 60  # VirusTotal on 60 links (~15 min)
+    python evaluate.py --ml                 # Layer 1 + trained ML model
+    python evaluate.py --intel --ml         # all layers
 
 Output: evaluation_results.xlsx  (sheets: Summary, Results)
 
@@ -81,6 +83,7 @@ def main():
     p.add_argument("--limit", type=int, default=0, help="max phishing links to test (0 = all)")
     p.add_argument("--out", default="evaluation_results.xlsx")
     p.add_argument("--intel", action="store_true", help="also run Layer 2 (Safe Browsing + VirusTotal)")
+    p.add_argument("--ml", action="store_true", help="also run Layer 3 (trained ML model)")
     p.add_argument("--vt-limit", type=int, default=20,
                    help="max links to send to VirusTotal (free tier ~15 s each; default 20)")
     args = p.parse_args()
@@ -116,6 +119,11 @@ def main():
             if url in intel:
                 threat_intel.apply_intel(r, intel[url])
 
+    if args.ml:
+        import url_features
+        for _, _, r in results:
+            url_features.apply_ml(r)
+
     rows = [(label, url, r.host, r.verdict, "; ".join(r.reasons), layer1[url]) for label, url, r in results]
 
     phish_counts = Counter(r[3] for r in rows if r[0].startswith("Phishing"))
@@ -134,15 +142,16 @@ def main():
     wrongly_flagged = [r for r in rows if r[0].startswith("Safe") and r[3] != SAFE]
     print(f"\nPhishing links wrongly marked SAFE: {len(missed)}   <- most important, should be 0")
     print(f"Official links NOT marked SAFE:     {len(wrongly_flagged)}")
-    if args.intel:
+    if args.intel or args.ml:
         upgraded = sum(1 for r in rows if r[0].startswith("Phishing") and r[5] != SCAM and r[3] == SCAM)
-        print(f"Phishing links upgraded to SCAM by Layer 2: {upgraded}")
+        print(f"Phishing links upgraded to SCAM by the extra layers: {upgraded}")
 
     # ---- spreadsheet ----
     wb = Workbook()
     s = wb.active
     s.title = "Summary"
-    title = "Layer 1 + Layer 2 (domain checks + threat intel)" if args.intel else "Layer 1 (domain checks)"
+    layers = ["Layer 1 (domain)"] + (["Layer 2 (threat intel)"] if args.intel else []) + (["Layer 3 (ML)"] if args.ml else [])
+    title = " + ".join(layers)
     s.append([f"Evaluation of {title}"])
     vt_note = f"   VirusTotal: first {args.vt_limit} non-official links" if args.intel else ""
     s.append([f"Run: {datetime.now():%Y-%m-%d %H:%M}   Source: OpenPhish public feed{vt_note}"])
@@ -160,8 +169,8 @@ def main():
     s.append([])
     s.append(["Phishing links wrongly marked SAFE (goal: 0)", None,
               '=COUNTIFS(Results!A:A,"Phishing (OpenPhish)",Results!D:D,"SAFE")'])
-    if args.intel:
-        s.append(["Phishing links upgraded to SCAM by Layer 2", None,
+    if args.intel or args.ml:
+        s.append(["Phishing links upgraded to SCAM by the extra layers", None,
                   '=COUNTIFS(Results!A:A,"Phishing (OpenPhish)",Results!D:D,"SCAM",Results!F:F,"<>SCAM")'])
     else:
         s.append(["Note: Layer 1 only detects impersonation of Bahrain domains. Global phishing "

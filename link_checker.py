@@ -12,6 +12,8 @@ Usage:
     python link_checker.py --demo                    # run built-in test cases
     python link_checker.py --whois "https://..."     # also check domain age
     python link_checker.py --intel "https://..."     # Layer 2: threat intelligence
+    python link_checker.py --ml "https://..."        # Layer 3: trained ML model
+    python link_checker.py --intel --ml "https://..." # everything
 
 Requirements:
     pip install openpyxl tldextract python-whois
@@ -357,6 +359,8 @@ def main():
     p.add_argument("--file", help="text file with one URL per line")
     p.add_argument("--demo", action="store_true", help="run built-in test cases")
     p.add_argument("--whois", action="store_true", help="also check domain age (needs internet)")
+    p.add_argument("--ml", action="store_true",
+                   help="Layer 3: add the trained ML model's score (needs phishing_model.joblib)")
     p.add_argument("--intel", action="store_true",
                    help="Layer 2: check Google Safe Browsing + VirusTotal (needs .env with API keys)")
     p.add_argument("--allowlist", default=str(ALLOWLIST_FILE), help="path to the allowlist .xlsx")
@@ -403,6 +407,11 @@ def main():
             intel = threat_intel.check_many(list(real.values()), keys)
             for r in todo:
                 threat_intel.apply_intel(r, intel[real[r.url]])
+
+    if args.ml:
+        import url_features
+        for r in results:
+            url_features.apply_ml(r)
 
     for r in results:
         print_result(r)
