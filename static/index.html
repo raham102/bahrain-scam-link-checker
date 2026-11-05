@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bahrain Scam Link Checker</title>
+<meta name="description" content="Got a link by SMS or WhatsApp? Check whether it is a real Bahrain website or a scam before you tap it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --pearl: #EEF2F1;
+    --surface: #FFFFFF;
+    --ink: #12303A;
+    --muted: #557075;
+    --line: #CBD7D6;
+    --focus: #2B7A9B;
+    --safe: #1E7A4C;   --safe-bg: #E3F3EA;
+    --sus: #9A5F0C;    --sus-bg: #FBF0DC;
+    --scam: #B3202A;   --scam-bg: #FBE4E4;
+    --radius-bubble: 22px;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--pearl);
+    color: var(--ink);
+    font-family: "Readex Pro", system-ui, sans-serif;
+    font-weight: 400;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 44rem; margin: 0 auto; padding: 0 1rem; }
+
+  /* Header */
+  header { padding: 1.25rem 0; }
+  header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .wordmark { font-weight: 600; font-size: 1rem; letter-spacing: 0.01em; }
+  .wordmark span { color: var(--muted); font-weight: 400; }
+  .lang {
+    font: inherit; font-size: 0.95rem; color: var(--ink);
+    background: transparent; border: 1px solid var(--line); border-radius: 999px;
+    padding: 0.35rem 0.95rem; cursor: pointer;
+  }
+  .lang:hover { border-color: var(--ink); }
+
+  /* Hero */
+  .hero { padding: 2.5rem 0 1.5rem; }
+  h1 {
+    font-size: clamp(2rem, 6.5vw, 3.1rem);
+    line-height: 1.12;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0 0 0.75rem;
+    max-width: 18ch;
+  }
+  html[dir="rtl"] h1 { letter-spacing: 0; line-height: 1.3; max-width: 22ch; }
+  .lede { color: var(--muted); margin: 0 0 2rem; max-width: 34rem; font-weight: 300; font-size: 1.15rem; }
+
+  /* The message bubble */
+  .bubble {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-bubble);
+    border-end-start-radius: 6px;
+    padding: 1rem 1.15rem 0.85rem;
+    box-shadow: 0 1px 0 rgba(18, 48, 58, 0.04);
+  }
+  .bubble:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px rgba(43, 122, 155, 0.18); }
+  .bubble label { display: block; font-size: 0.9rem; color: var(--muted); margin-bottom: 0.35rem; }
+  textarea {
+    width: 100%; min-height: 6.5rem; resize: vertical;
+    border: 0; outline: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: 1.05rem; line-height: 1.55;
+  }
+  textarea::placeholder { color: #8A9DA0; }
+  .bubble-foot { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+                 border-top: 1px solid var(--pearl); padding-top: 0.7rem; margin-top: 0.3rem; }
+  .privacy { font-size: 0.85rem; color: var(--muted); margin: 0; }
+  .check {
+    font: inherit; font-weight: 500; font-size: 1rem;
+    background: var(--ink); color: #fff; border: 0; border-radius: 999px;
+    padding: 0.65rem 1.4rem; cursor: pointer; white-space: nowrap;
+  }
+  .check:hover { background: #1C4552; }
+  .check[disabled] { opacity: 0.65; cursor: progress; }
+
+  .examples { margin: 1rem 0 0; font-size: 0.92rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .examples button {
+    font: inherit; font-size: 0.9rem; color: var(--ink); cursor: pointer;
+    background: transparent; border: 1px dashed var(--line); border-radius: 999px; padding: 0.25rem 0.8rem;
+  }
+  .examples button:hover { border-style: solid; border-color: var(--ink); }
+
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  textarea:focus-visible { outline: none; }
+
+  /* Status line */
+  .status { min-height: 1.6rem; margin: 1.25rem 0 0; font-size: 0.95rem; color: var(--muted); }
+  .status.error { color: var(--scam); }
+
+  /* Results */
+  .results { padding: 0.5rem 0 3rem; display: grid; gap: 1.5rem; }
+  .result { background: var(--surface); border-radius: 18px; overflow: hidden; border: 1px solid var(--line); }
+  .stamp {
+    display: flex; align-items: baseline; gap: 0.9rem; flex-wrap: wrap;
+    padding: 1.25rem 1.4rem 1.1rem;
+    color: var(--c); background: var(--bg);
+    border-bottom: 3px solid var(--c);
+  }
+  .result[data-v="SAFE"] { --c: var(--safe); --bg: var(--safe-bg); }
+  .result[data-v="SUSPICIOUS"] { --c: var(--sus); --bg: var(--sus-bg); }
+  .result[data-v="SCAM"] { --c: var(--scam); --bg: var(--scam-bg); }
+  .stamp .icon { font-size: 2rem; line-height: 1; align-self: center; }
+  .stamp .word { font-size: clamp(2.2rem, 8vw, 3rem); font-weight: 700; line-height: 1; letter-spacing: -0.01em; }
+  .stamp .other { font-size: 1.15rem; font-weight: 500; opacity: 0.8; }
+  .reveal .stamp { animation: press 260ms cubic-bezier(.2,.9,.3,1.2) both; }
+  @keyframes press { from { transform: scale(1.05); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .reveal .stamp { animation: none; } }
+
+  .body { padding: 1.2rem 1.4rem 1.3rem; }
+  .linkline { margin: 0 0 0.9rem; font-size: 0.92rem; color: var(--muted); overflow-wrap: anywhere; }
+  .linkline bdi { color: var(--ink); display: block; }
+  .headline { font-size: 1.3rem; font-weight: 600; line-height: 1.35; margin: 0 0 0.4rem; }
+  .explanation { margin: 0 0 1rem; max-width: 36rem; }
+  .advice { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; }
+  .advice li { padding-inline-start: 1.35rem; position: relative; }
+  .advice li::before { content: ""; position: absolute; inset-inline-start: 0.2rem; top: 0.68em;
+                       width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--c); }
+
+  details { margin-top: 1.2rem; border-top: 1px solid var(--pearl); padding-top: 0.9rem; font-size: 0.92rem; }
+  summary { cursor: pointer; color: var(--muted); }
+  summary:hover { color: var(--ink); }
+  .evidence { margin: 0.7rem 0 0; padding-inline-start: 1.1rem; color: var(--ink); }
+  .evidence li { margin-bottom: 0.3rem; }
+  .layers { color: var(--muted); margin: 0.6rem 0 0; }
+
+  /* Footer */
+  footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.92rem; }
+  footer h2 { font-size: 1rem; color: var(--ink); font-weight: 600; margin: 0 0 0.5rem; }
+  footer p { margin: 0 0 0.8rem; max-width: 36rem; }
+  footer a { color: var(--ink); }
+  .hotline { color: var(--ink); font-weight: 500; }
+
+  @media (max-width: 34rem) {
+    .hero { padding-top: 1.25rem; }
+    .bubble-foot { flex-direction: column; align-items: stretch; }
+    .check { width: 100%; padding: 0.8rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="wordmark" data-i18n="brand"></div>
+    <button class="lang" id="lang" type="button" aria-label="Change language"></button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1 data-i18n="headline"></h1>
+    <p class="lede" data-i18n="lede"></p>
+
+    <form id="form" novalidate>
+      <div class="bubble">
+        <label for="text" data-i18n="label"></label>
+        <textarea id="text" name="text" maxlength="2000" autocomplete="off" spellcheck="false" dir="auto"></textarea>
+        <div class="bubble-foot">
+          <p class="privacy" data-i18n="privacy"></p>
+          <button class="check" id="check" type="submit" data-i18n="check"></button>
+        </div>
+      </div>
+    </form>
+
+    <div class="examples">
+      <span data-i18n="try"></span>
+      <button type="button" data-example="scam" data-i18n="exScam"></button>
+      <button type="button" data-example="official" data-i18n="exOfficial"></button>
+    </div>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="results" id="results" aria-live="polite"></section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <h2 data-i18n="howTitle"></h2>
+    <p data-i18n="how1"></p>
+    <p data-i18n="how2"></p>
+    <p class="hotline" data-i18n="hotline"></p>
+    <p><a href="https://github.com/rahma102/bahrain-scam-link-checker" data-i18n="source"></a></p>
+  </div>
+</footer>
+
+<script>
+const T = {
+  en: {
+    brand: "Bahrain Scam Link Checker",
+    headline: "Got a link in a message? Check it before you tap.",
+    lede: "Paste a link from an SMS or WhatsApp message. We'll tell you if it's a real Bahrain website or a scam pretending to be one.",
+    label: "Paste the link, or the whole message",
+    placeholder: "e.g. Your parcel is held at customs. Pay the fee at …",
+    privacy: "We never open the link. We only read its address.",
+    check: "Check link",
+    checking: "Checking…",
+    try: "Try an example:",
+    exScam: "Fake Gulf Air SMS",
+    exOfficial: "Official government link",
+    wait: "Checking against our official list, security databases and our model. This can take up to 20 seconds.",
+    empty: "Paste a link or a message first.",
+    noLink: "We couldn't find a link in that text. Paste a link that starts with http, or the whole message.",
+    rateLimited: "Too many checks from this connection. Wait a minute and try again.",
+    failed: "The check didn't finish. Check your internet connection and try again.",
+    found: n => n === 1 ? "" : `We found ${n} links in your message.`,
+    link: "Link checked:",
+    details: "Show what we checked",
+    detailsNote: "Technical details (in English)",
+    layers: "Checks used:",
+    cached: "(checked recently, result reused)",
+    howTitle: "How it works",
+    how1: "We compare the address with a verified list of official Bahrain government and company websites, look it up in Google Safe Browsing and VirusTotal, and score it with a machine-learning model trained on 235,000 links. An AI then explains the result in plain words.",
+    how2: "\"Suspicious\" means we couldn't confirm the link is safe. Treat it like a scam: don't enter personal or payment details, and use the organisation's official app or website instead.",
+    hotline: "Entered your details on a fake site? Call your bank now, then report it to the Anti-Cybercrime Directorate on 992.",
+    source: "Source code on GitHub",
+    toggle: "العربية",
+  },
+  ar: {
+    brand: "فاحص روابط الاحتيال – البحرين",
+    headline: "وصلك رابط في رسالة؟ افحصه قبل أن تضغط عليه.",
+    lede: "الصق رابطاً من رسالة نصية أو واتساب، وسنخبرك إن كان موقعاً بحرينياً حقيقياً أو موقعاً احتيالياً ينتحل صفته.",
+    label: "الصق الرابط أو الرسالة كاملة",
+    placeholder: "مثال: شحنتك محتجزة في الجمارك. ادفع الرسوم عبر …",
+    privacy: "لا نفتح الرابط أبداً، نقرأ عنوانه فقط.",
+    check: "افحص الرابط",
+    checking: "جارٍ الفحص…",
+    try: "جرّب مثالاً:",
+    exScam: "رسالة مزيفة من طيران الخليج",
+    exOfficial: "رابط حكومي رسمي",
+    wait: "نقارن الرابط بقائمتنا الرسمية وقواعد بيانات الأمان ونموذجنا الذكي. قد يستغرق ذلك حتى ٢٠ ثانية.",
+    empty: "الصق رابطاً أو رسالة أولاً.",
+    noLink: "لم نجد رابطاً في هذا النص. الصق رابطاً يبدأ بـ http أو الرسالة كاملة.",
+    rateLimited: "عدد كبير من الفحوصات من هذا الاتصال. انتظر دقيقة ثم حاول مجدداً.",
+    failed: "لم يكتمل الفحص. تحقق من اتصالك بالإنترنت وحاول مجدداً.",
+    found: n => n === 1 ? "" : n === 2 ? "وجدنا رابطين في رسالتك." : `وجدنا ${n} روابط في رسالتك.`,
+    link: "الرابط الذي تم فحصه:",
+    details: "عرض ما تم فحصه",
+    detailsNote: "تفاصيل تقنية (بالإنجليزية)",
+    layers: "الفحوصات المستخدمة:",
+    cached: "(تم فحصه مؤخراً، أُعيد استخدام النتيجة)",
+    howTitle: "كيف يعمل الفاحص",
+    how1: "نقارن عنوان الرابط بقائمة موثقة للمواقع الرسمية للحكومة والشركات في البحرين، ونبحث عنه في Google Safe Browsing وVirusTotal، ونقيّمه بنموذج تعلّم آلي مُدرَّب على ٢٣٥ ألف رابط. ثم يشرح الذكاء الاصطناعي النتيجة بكلمات بسيطة.",
+    how2: "«مشبوه» تعني أننا لم نتمكن من التأكد من أن الرابط آمن. تعامل معه كأنه احتيال: لا تُدخل بياناتك الشخصية أو بيانات الدفع، واستخدم التطبيق أو الموقع الرسمي للجهة بدلاً منه.",
+    hotline: "أدخلت بياناتك في موقع مزيف؟ اتصل ببنكك فوراً، ثم أبلغ إدارة مكافحة الجرائم الإلكترونية على الرقم 992.",
+    source: "الشيفرة المصدرية على GitHub",
+    toggle: "English",
+  },
+};
+const EXAMPLES = {
+  scam: "Gulf Air: Congratulations! You have won 2 free tickets. Claim them before midnight: hxxps://gulfairsz[.]bond/air",
+  official: "https://www.bahrain.bh/wps/portal/en/BNP/HomePage",
+};
+const ICON = { SAFE: "✅", SUSPICIOUS: "⚠️", SCAM: "⛔" };
+
+let lang = "en";
+let lastResults = null;
+try { lang = localStorage.getItem("lang") || ((navigator.language || "").startsWith("ar") ? "ar" : "en"); } catch (e) {}
+
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+function applyLang() {
+  const t = T[lang];
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+  document.title = t.brand;
+  document.querySelectorAll("[data-i18n]").forEach(n => { n.textContent = t[n.dataset.i18n]; });
+  $("text").placeholder = t.placeholder;
+  $("lang").textContent = t.toggle;
+  if (lastResults) render(lastResults, false);
+}
+
+function setStatus(msg, isError) {
+  const s = $("status");
+  s.textContent = msg || "";
+  s.classList.toggle("error", !!isError);
+}
+
+function render(data, animate) {
+  const t = T[lang], other = lang === "ar" ? "en" : "ar";
+  const box = $("results");
+  box.replaceChildren();
+  setStatus(t.found(data.found));
+  data.results.forEach(r => {
+    const card = el("article", "result" + (animate ? " reveal" : ""));
+    card.dataset.v = r.verdict;
+
+    const stamp = el("div", "stamp");
+    stamp.append(el("span", "icon", ICON[r.verdict]), el("span", "word", r.label[lang]), el("span", "other", r.label[other]));
+    stamp.querySelector(".icon").setAttribute("aria-hidden", "true");
+
+    const body = el("div", "body");
+    const line = el("p", "linkline", t.link + " ");
+    const bdi = el("bdi", null, r.link);
+    bdi.setAttribute("dir", "ltr");
+    line.append(bdi);
+
+    const e = r[lang];
+    const advice = el("ul", "advice");
+    e.advice.forEach(a => advice.append(el("li", null, a)));
+
+    const details = el("details");
+    details.append(el("summary", null, t.details));
+    const ev = el("ul", "evidence");
+    ev.setAttribute("dir", "ltr");
+    ev.setAttribute("aria-label", t.detailsNote);
+    r.evidence.forEach(x => ev.append(el("li", null, x)));
+    details.append(ev, el("p", "layers", `${t.layers} ${r.layers.join(", ")} ${r.cached ? t.cached : ""}`));
+
+    body.append(line, el("h2", "headline", e.headline), el("p", "explanation", e.explanation), advice, details);
+    card.append(stamp, body);
+    box.append(card);
+  });
+}
+
+async function runCheck(text) {
+  const t = T[lang];
+  if (!text.trim()) { setStatus(t.empty, true); $("text").focus(); return; }
+  const btn = $("check");
+  btn.disabled = true; btn.textContent = t.checking;
+  setStatus(t.wait);
+  $("results").replaceChildren();
+  try {
+    const res = await fetch("/api/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (res.status === 422) { lastResults = null; setStatus(T[lang].noLink, true); return; }
+    if (res.status === 429) { lastResults = null; setStatus(T[lang].rateLimited, true); return; }
+    if (!res.ok) throw new Error(res.status);
+    lastResults = await res.json();
+    render(lastResults, true);
+    $("results").firstElementChild?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" });
+  } catch (err) {
+    lastResults = null;
+    setStatus(T[lang].failed, true);
+  } finally {
+    btn.disabled = false; btn.textContent = T[lang].check;
+  }
+}
+
+$("form").addEventListener("submit", e => { e.preventDefault(); runCheck($("text").value); });
+$("text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runCheck($("text").value); } });
+document.querySelectorAll("[data-example]").forEach(b => b.addEventListener("click", () => {
+  $("text").value = EXAMPLES[b.dataset.example];
+  runCheck($("text").value);
+}));
+$("lang").addEventListener("click", () => {
+  lang = lang === "ar" ? "en" : "ar";
+  try { localStorage.setItem("lang", lang); } catch (e) {}
+  applyLang();
+});
+applyLang();
+</script>
+</body>
+</html>

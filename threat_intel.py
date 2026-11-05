@@ -51,7 +51,7 @@ def load_keys(path: Path = ENV_FILE) -> dict:
             if line and not line.startswith("#") and "=" in line:
                 name, value = line.split("=", 1)
                 keys[name.strip()] = value.strip().strip('"').strip("'")
-    for name in ("VT_API_KEY", "GSB_API_KEY"):     # environment variables also work
+    for name in ("VT_API_KEY", "GSB_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL"):     # environment variables also work
         if os.environ.get(name):
             keys[name] = os.environ[name]
     return keys
@@ -100,11 +100,17 @@ def gsb_check(urls: list[str], api_key: str) -> dict[str, list[str]]:
 # VirusTotal
 # ---------------------------------------------------------------------------
 
-def vt_check(url: str, api_key: str) -> dict | None:
+class VTBusy(Exception):
+    """Raised instead of waiting when the free-tier rate limit is in use (website mode)."""
+
+
+def vt_check(url: str, api_key: str, wait_if_busy: bool = True) -> dict | None:
     """Return VirusTotal's last analysis stats, or None if it has never seen the URL."""
     global _last_vt_call
     wait = VT_MIN_INTERVAL - (time.time() - _last_vt_call)
     if wait > 0:
+        if not wait_if_busy:
+            raise VTBusy()
         time.sleep(wait)
     _last_vt_call = time.time()
 
@@ -181,7 +187,8 @@ def apply_intel(result, intel: IntelResult):
     return result
 
 
-def check_many(urls: list[str], keys: dict, use_vt: bool = True, progress=None) -> dict[str, IntelResult]:
+def check_many(urls: list[str], keys: dict, use_vt: bool = True, progress=None,
+               vt_wait: bool = True) -> dict[str, IntelResult]:
     """Run threat intel on many URLs. Safe Browsing is batched; VirusTotal is rate-limited."""
     out = {u: IntelResult() for u in urls}
 
@@ -200,8 +207,10 @@ def check_many(urls: list[str], keys: dict, use_vt: bool = True, progress=None) 
             if progress:
                 progress(i, len(urls), u)
             try:
-                out[u].vt_stats = vt_check(u, keys["VT_API_KEY"])
+                out[u].vt_stats = vt_check(u, keys["VT_API_KEY"], wait_if_busy=vt_wait)
                 out[u].checked.append("VirusTotal")
+            except VTBusy:
+                out[u].errors.append("VirusTotal (skipped: free-tier limit of 4 checks a minute is in use)")
             except Exception as e:
                 out[u].errors.append(f"VirusTotal ({_short_error(e)})")
                 if isinstance(e, urllib.error.HTTPError) and e.code in (401, 403):
