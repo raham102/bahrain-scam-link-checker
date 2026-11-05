@@ -50,7 +50,42 @@ URL_SHORTENERS = {
 RISKY_TLDS = {
     "xyz", "top", "click", "online", "site", "live", "icu", "buzz", "shop",
     "info", "cfd", "sbs", "rest", "support", "help", "cc", "vip", "work",
+    "bond", "run", "cyou", "lol", "mom", "today", "fun", "space", "website", "life",
+    "quest", "autos", "boats", "hair", "beauty", "skin", "monster", "cam", "win", "bid", "loan",
 }
+
+# Third-party addresses that imitate country domains (e.g. shop.sa.com looks Saudi but isn't)
+RESELLER_SUFFIXES = {
+    "sa.com": "Saudi Arabia", "ae.org": "UAE", "us.com": "USA", "uk.com": "UK", "eu.com": "EU",
+    "cn.com": "China", "gb.net": "UK", "za.com": "South Africa", "br.com": "Brazil",
+    "ru.com": "Russia", "de.com": "Germany", "jpn.com": "Japan", "in.net": "India",
+}
+
+# Bahraini / regional companies scammers often impersonate.
+# keyword -> (brand name, real domains). Keywords of 4 letters or fewer must appear as a
+# separate word in the domain AND come with another red flag (risky ending or lure word),
+# because short words can appear in innocent names.
+# Real domains: verify each one before relying on it.
+IMPERSONATED_BRANDS = {
+    "gulfair": ("Gulf Air", {"gulfair.com"}),
+    "ilabank": ("ila Bank", {"ilabank.com"}),
+    "ila": ("ila Bank", {"ilabank.com"}),
+    "aramex": ("Aramex", {"aramex.com"}),
+    "batelco": ("Batelco", {"batelco.com"}),
+    "bbkonline": ("BBK", {"bbkonline.com"}),
+    "bbk": ("BBK", {"bbkonline.com"}),
+    "nbbonline": ("National Bank of Bahrain", {"nbbonline.com"}),
+    "nbb": ("National Bank of Bahrain", {"nbbonline.com"}),
+    "bisb": ("Bahrain Islamic Bank", {"bisb.com"}),
+    "benefitpay": ("BenefitPay", {"benefit.bh"}),
+    "bahrainpost": ("Bahrain Post", {"mtt.gov.bh"}),
+    "stc": ("stc Bahrain", {"stc.com.bh"}),
+    "talabat": ("Talabat", {"talabat.com"}),
+    "aramco": ("Aramco", {"aramco.com"}),
+    "dhl": ("DHL", {"dhl.com"}),
+    "fedex": ("FedEx", {"fedex.com"}),
+}
+BRAND_DOMAINS = set().union(*(d for _, d in IMPERSONATED_BRANDS.values()))
 
 # Words scammers put in fake government / payment domains
 LURE_WORDS = {
@@ -104,7 +139,7 @@ def load_allowlist(path: Path = ALLOWLIST_FILE) -> set[str]:
         value = (row[0] or "").strip().lower()
         if value and "." in value:
             domains.add(value)
-    return domains
+    return domains | BRAND_DOMAINS
 
 
 # ---------------------------------------------------------------------------
@@ -261,9 +296,40 @@ def check_url(url: str, allowlist: set[str], use_whois: bool = False) -> Result:
             scam_signals.append(f"Contains the official name '{d}' but the real domain is '{registered}'.")
             break
 
+    tld = suffix.split(".")[-1] if suffix else ""
+    words = tokens(plain_host)
+    label_text = to_ascii_lookalike(decode_punycode(f"{sub}.{dom}" if sub else dom))
+    label_words = tokens(label_text)
+    reseller = next((r for r in RESELLER_SUFFIXES if host == r or host.endswith("." + r)), None)
+    cheap_ending = tld in RISKY_TLDS or reseller is not None
+    lure_hit = LURE_WORDS & words
+
+    # Rule 5a: impersonated company brands (Gulf Air, ila Bank, Aramex ...)
+    for kw, (brand, real) in IMPERSONATED_BRANDS.items():
+        found = (kw in label_text.replace("-", "")) if len(kw) > 4 else (kw in label_words)
+        if not found or any(registered == d or host.endswith("." + d) for d in real):
+            continue
+        msg = f"Uses the name '{brand}' but the real {brand} site is {', '.join(sorted(real))}."
+        if len(kw) > 4 or cheap_ending or lure_hit:
+            scam_signals.append(msg)
+        else:
+            warn_signals.append(msg)
+        break
+
+    # Rule 5b: domains that target Bahrain: 'bahrain' + country code, or Bahrain + cheap ending
+    bahrain_word = any("bahrain" in w for w in label_words)
+    country_code = bool({"bh", "bhr"} & label_words) or dom.endswith(("bh", "bhr"))
+    if bahrain_word and country_code:
+        scam_signals.append(f"Combines 'bahrain' with Bahrain's country code to look official, "
+                            f"but the real domain is '{registered}'.")
+    elif (bahrain_word or country_code) and cheap_ending:
+        ending = f"'{reseller}'" if reseller else f"'.{tld}'"
+        scam_signals.append(f"Targets Bahrain ('{'bahrain' if bahrain_word else 'bh'}' in the name) "
+                            f"on a cheap {ending} domain - official sites never use these.")
+
     # Rule 5: look-alike spelling of an official domain
     check_label = to_ascii_lookalike(decode_punycode(dom))
-    for d in allowlist:
+    for d in ([] if scam_signals else allowlist):
         d_sub, d_dom, d_suffix = split_domain(d)
         if len(d_dom) < 5:          # too short - would cause false alarms
             continue
@@ -277,21 +343,21 @@ def check_url(url: str, allowlist: set[str], use_whois: bool = False) -> Result:
             break
 
     # gov / bh written as part of the name: gov-bh.com, bahrain-gov.net ...
-    words = tokens(plain_host)
     if ({"gov", "govbh"} & words or "gov-bh" in plain_host) and ({"bh", "bahrain"} & words or "govbh" in words):
         scam_signals.append("Domain pretends to be a Bahrain government site (contains 'gov' + 'bh/bahrain') but isn't under .gov.bh.")
 
     # Brand + lure words: bahrain-traffic-fines.com, benefitpay-refund.xyz ...
-    brand_hit = BRAND_WORDS & words or {w for w in words if "bahrain" in w}
-    lure_hit = LURE_WORDS & words
+    brand_hit = BRAND_WORDS & label_words or {w for w in label_words if "bahrain" in w}
     if brand_hit and lure_hit and not scam_signals:
         warn_signals.append(f"Mixes Bahrain branding ({', '.join(sorted(brand_hit))}) with lure words ({', '.join(sorted(lure_hit))}).")
     elif brand_hit and not scam_signals:
         warn_signals.append("Mentions Bahrain but is not an official domain.")
 
-    tld = suffix.split(".")[-1] if suffix else ""
     if tld in RISKY_TLDS:
         warn_signals.append(f"Uses the '.{tld}' ending, which is common in scam sites.")
+    if reseller:
+        warn_signals.append(f"Uses a '{reseller}' address, which imitates a {RESELLER_SUFFIXES[reseller]} "
+                            "domain but is a cheap third-party name.")
 
     if host.count(".") >= 4:
         warn_signals.append("Unusually many subdomains - a common trick to hide the real domain.")
@@ -348,7 +414,14 @@ DEMO = [
     ("https://www.newsofbahrain.com", SUSPICIOUS),  # real news site: not official, but no impersonation
     ("http://45.12.33.10/traffic", SUSPICIOUS),
     ("https://bit.ly/3abcXYZ", SUSPICIOUS),
-    ("https://bahrainpost-delivery.online", SUSPICIOUS),
+    ("https://bahrainpost-delivery.online", SCAM),
+    # real scam links sent to people in Bahrain (defanged)
+    ("hxxps://bahrain-bhr[.]com/bl", SCAM),
+    ("hxxps://gulfairsz[.]bond/air", SCAM),
+    ("hxxps://ila-app[.]live/ib/", SCAM),
+    ("hxxp://arxbh[.]cc/bh", SCAM),
+    ("https://www.gulfair.com/", SAFE),
+    ("https://shura.bh/en/", SAFE),
     ("https://www.example.com", SUSPICIOUS),
 ]
 

@@ -24,7 +24,7 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
-from link_checker import check_url, load_allowlist, SAFE, SUSPICIOUS, SCAM
+from link_checker import check_url, load_allowlist, refang, SAFE, SUSPICIOUS, SCAM
 
 FEED_URL = "https://raw.githubusercontent.com/openphish/public_feed/refs/heads/main/feed.txt"
 
@@ -62,8 +62,26 @@ KNOWN_SAFE = [
 ]
 
 
+# Real scam links sent by SMS/WhatsApp to people in Bahrain (stored defanged).
+# Add new ones as you collect them: they are the most realistic test set.
+REAL_BAHRAIN_SCAMS = [
+    "hxxps://bahrain-bhr[.]com/bl",
+    "hxxps://services.bahrainer[.]cc/bh",
+    "hxxp://arxbh[.]cc/bh",
+    "hxxps://sw[.]run/xItjc",
+    "hxxps://ila-app[.]live/ib/",
+    "hxxps://gulfairsz[.]bond/air",
+    "hxxps://acsrei[.]bond",
+    "hxxps://shopchp.sa[.]com/ko",
+]
+
+GROUPS = ["Phishing (OpenPhish)", "Phishing (real Bahrain SMS)", "Safe (official)"]
+
+
 def defang(url: str) -> str:
     """Make a link unclickable for safe sharing: https://a.com -> hxxps://a[.]com"""
+    if "[.]" in url:
+        return url
     return url.replace("http", "hxxp", 1).replace(".", "[.]")
 
 
@@ -93,7 +111,9 @@ def main():
     if args.limit:
         phishing = phishing[: args.limit]
 
-    labelled = [("Phishing (OpenPhish)", u) for u in phishing] + [("Safe (official)", u) for u in KNOWN_SAFE]
+    labelled = ([("Phishing (OpenPhish)", u) for u in phishing]
+                + [("Phishing (real Bahrain SMS)", refang(u)) for u in REAL_BAHRAIN_SCAMS]
+                + [("Safe (official)", u) for u in KNOWN_SAFE])
     results = [(label, url, check_url(url, allowlist)) for label, url in labelled]
     layer1 = {url: r.verdict for _, url, r in results}
 
@@ -102,7 +122,9 @@ def main():
         keys = threat_intel.load_keys()
         if not keys:
             raise SystemExit("No API keys found - create a .env file (see .env.example).")
-        todo = [url for _, url, r in results if r.verdict != SAFE]
+        # Real Bahrain scams first, so they always get a VirusTotal lookup within --vt-limit
+        todo = ([url for label, url, r in results if r.verdict != SAFE and label == GROUPS[1]]
+                + [url for label, url, r in results if r.verdict != SAFE and label != GROUPS[1]])
         print(f"Google Safe Browsing: checking {len(todo)} links...")
         intel = threat_intel.check_many(todo, {"GSB_API_KEY": keys.get("GSB_API_KEY")})
         if keys.get("VT_API_KEY") and args.vt_limit:
@@ -126,17 +148,14 @@ def main():
 
     rows = [(label, url, r.host, r.verdict, "; ".join(r.reasons), layer1[url]) for label, url, r in results]
 
-    phish_counts = Counter(r[3] for r in rows if r[0].startswith("Phishing"))
-    safe_counts = Counter(r[3] for r in rows if r[0].startswith("Safe"))
-    n_phish, n_safe = sum(phish_counts.values()), sum(safe_counts.values())
-
     # ---- console summary ----
-    print(f"\nPhishing links tested: {n_phish}")
-    for v in (SCAM, SUSPICIOUS, SAFE):
-        print(f"  {v:<10} {phish_counts[v]:>4}  ({phish_counts[v] / max(n_phish, 1):.0%})")
-    print(f"\nOfficial links tested: {n_safe}")
-    for v in (SAFE, SUSPICIOUS, SCAM):
-        print(f"  {v:<10} {safe_counts[v]:>4}  ({safe_counts[v] / max(n_safe, 1):.0%})")
+    for group in GROUPS:
+        counts = Counter(r[3] for r in rows if r[0] == group)
+        n = sum(counts.values())
+        print(f"\n{group}: {n} links")
+        order = (SAFE, SUSPICIOUS, SCAM) if group.startswith("Safe") else (SCAM, SUSPICIOUS, SAFE)
+        for v in order:
+            print(f"  {v:<10} {counts[v]:>4}  ({counts[v] / max(n, 1):.0%})")
 
     missed = [r for r in rows if r[0].startswith("Phishing") and r[3] == SAFE]
     wrongly_flagged = [r for r in rows if r[0].startswith("Safe") and r[3] != SAFE]
@@ -158,8 +177,7 @@ def main():
     s.append([])
     s.append(["Group", "Verdict", "Count", "Share"])
     first = s.max_row + 1
-    for label, counts, n in (("Phishing (OpenPhish)", phish_counts, n_phish),
-                             ("Safe (official)", safe_counts, n_safe)):
+    for label in GROUPS:
         for v in (SAFE, SUSPICIOUS, SCAM):
             row = s.max_row + 1
             s.append([label, v,
@@ -168,10 +186,10 @@ def main():
             s.cell(row, 4).number_format = "0%"
     s.append([])
     s.append(["Phishing links wrongly marked SAFE (goal: 0)", None,
-              '=COUNTIFS(Results!A:A,"Phishing (OpenPhish)",Results!D:D,"SAFE")'])
+              '=COUNTIFS(Results!A:A,"Phishing*",Results!D:D,"SAFE")'])
     if args.intel or args.ml:
         s.append(["Phishing links upgraded to SCAM by the extra layers", None,
-                  '=COUNTIFS(Results!A:A,"Phishing (OpenPhish)",Results!D:D,"SCAM",Results!F:F,"<>SCAM")'])
+                  '=COUNTIFS(Results!A:A,"Phishing*",Results!D:D,"SCAM",Results!F:F,"<>SCAM")'])
     else:
         s.append(["Note: Layer 1 only detects impersonation of Bahrain domains. Global phishing "
                   "links (Netflix, Outlook...) are expected to be SUSPICIOUS; Layer 2 will classify them."])

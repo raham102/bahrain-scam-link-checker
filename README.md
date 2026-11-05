@@ -22,6 +22,8 @@ The checker is built in layers. Each layer adds evidence before a final verdict 
   - Detects fake government names (`gov-bh[.]com`, `bahrain-gov-payment[.]xyz`)
   - Detects misspellings, including swapped letters (`bahrian[.]bh`)
   - Detects Unicode look-alike characters, e.g. a Cyrillic "а" in `bahrаin.bh`
+  - Detects impersonation of Bahraini brands (Gulf Air, ila Bank, BBK, NBB, BenefitPay, Batelco, Aramex…)
+  - Detects domains that target Bahrain: "bahrain" + country code (`bahrain-bhr[.]com`), or "bahrain"/"bh" on a cheap ending (`arxbh[.]cc`)
   - Flags raw IP addresses, URL shorteners, risky domain endings and excessive subdomains
   - Optional domain-age check (WHOIS): newly registered domains are a strong scam signal
 - [x] **Layer 2: Threat intelligence**. Checks non-official links against:
@@ -47,13 +49,27 @@ Tested on **300 live phishing links** from the [OpenPhish public feed](https://g
 | Layer 1 + 2 + 3 | 300 phishing links | **0** | 77 | **223 (74%)** |
 | All configurations | 29 official sites | **29** | 0 | 0 |
 
+### Real scam links sent to people in Bahrain
+
+8 real SMS/WhatsApp scam links collected in Bahrain (stored defanged in `evaluate.py`), impersonating government services, Gulf Air, ila Bank and delivery companies:
+
+| Configuration | SAFE | SUSPICIOUS | SCAM |
+|---|---|---|---|
+| Layer 1, first version (government domains only) | **0** | 7 | 1 |
+| Layer 1 with brand and Bahrain-targeting rules | **0** | 3 | 5 |
+| All layers (1 + 2 + 3) | **0** | 2 | **6** |
+
+These links revealed a blind spot: scammers impersonate Bahraini **companies** (airlines, banks, couriers), not only ministries. Layer 1 now knows the real domains of commonly impersonated brands and flags look-alikes such as `gulfairsz[.]bond` and `ila-app[.]live`. It also flags domains that combine "bahrain" or "bh" with Bahrain's country code or a cheap ending (`bahrain-bhr[.]com`, `arxbh[.]cc`).
+
+The two links still marked Suspicious give nothing away in the URL. One looks like a private link shortener (`sw[.]run/xItjc`) and the other has never been scanned by any database. Without opening the page, "Suspicious" is the honest verdict, and the planned page-analysis layer targets these.
+
 - **No phishing link was ever marked safe**, and no official site was wrongly flagged.
 - None of the phishing links in this feed impersonated Bahrain sites, so Layer 1 correctly marked them "Suspicious" rather than guessing.
 - Threat intelligence (Layer 2) confirmed 35% as scams. Google Safe Browsing checked all 300 links; VirusTotal checked the first 20 because of free-tier rate limits.
 - The ML model (Layer 3) raised that to **74%**, catching new phishing sites that aren't in any database yet.
 - Each run downloads the live feed, so the three phishing rows are from slightly different snapshots taken on the same day.
 
-Full results: `evaluation_layer1_2026-11-05.xlsx`, `evaluation_layer2_2026-11-05.xlsx`, `evaluation_layer3_2026-11-05.xlsx` (links are defanged).
+Full results: `evaluation_layer1_2026-11-05.xlsx`, `evaluation_layer2_2026-11-05.xlsx`, `evaluation_layer3_2026-11-05.xlsx`, `evaluation_layer3_bahrain_2026-11-05.xlsx` (links are defanged).
 
 ## Layer 3: machine-learning model
 

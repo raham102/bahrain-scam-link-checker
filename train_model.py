@@ -127,7 +127,7 @@ EVERYDAY_LEGIT = [
     "https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset",
     "https://www.virustotal.com/gui/home/url",
     "https://developers.google.com/safe-browsing/v4/lookup-api",
-    "https://www.nbb.com.bh/personal/cards/",
+    "https://www.nbbonline.com/personal/cards",
     "https://www.bisb.com/en/personal/accounts",
     "https://www.batelco.com/personal/mobile/postpaid/",
 ]
