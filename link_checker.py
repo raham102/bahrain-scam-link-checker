@@ -16,6 +16,7 @@ Usage:
     python link_checker.py --intel --ml "https://..." # layers 1-3
     python link_checker.py --intel --ml --explain "https://..."   # + AI explanation (EN + AR)
     python link_checker.py --explain --lang ar "https://..."      # Arabic only
+    python link_checker.py --intel --ml --scan --explain "https://..."  # all 5 layers
 
 Requirements:
     pip install openpyxl tldextract python-whois
@@ -320,6 +321,7 @@ def check_url(url: str, allowlist: set[str], use_whois: bool = False) -> Result:
 
     # Rule 5b: domains that target Bahrain: 'bahrain' + country code, or Bahrain + cheap ending
     bahrain_word = any("bahrain" in w for w in label_words)
+    # Note: "starts with bh" was tried and rejected - it flags common names like bhatia, bharat
     country_code = bool({"bh", "bhr"} & label_words) or dom.endswith(("bh", "bhr"))
     if bahrain_word and country_code:
         scam_signals.append(f"Combines 'bahrain' with Bahrain's country code to look official, "
@@ -422,6 +424,7 @@ DEMO = [
     ("hxxps://gulfairsz[.]bond/air", SCAM),
     ("hxxps://ila-app[.]live/ib/", SCAM),
     ("hxxp://arxbh[.]cc/bh", SCAM),
+    ("https://www.bhatia.cc/", SUSPICIOUS),      # must NOT be called a Bahrain scam
     ("https://www.gulfair.com/", SAFE),
     ("https://shura.bh/en/", SAFE),
     ("https://www.example.com", SUSPICIOUS),
@@ -434,6 +437,8 @@ def main():
     p.add_argument("--file", help="text file with one URL per line")
     p.add_argument("--demo", action="store_true", help="run built-in test cases")
     p.add_argument("--whois", action="store_true", help="also check domain age (needs internet)")
+    p.add_argument("--scan", action="store_true",
+                   help="Layer 5: open the page safely in urlscan.io's sandbox (needs URLSCAN_API_KEY; ~30-60 s)")
     p.add_argument("--explain", action="store_true",
                    help="Layer 4: plain-language explanation by AI (needs GEMINI_API_KEY in .env)")
     p.add_argument("--lang", choices=["en", "ar", "both"], default="both", help="language for --explain")
@@ -490,6 +495,27 @@ def main():
         import url_features
         for r in results:
             url_features.apply_ml(r)
+
+    if args.scan:
+        import page_scan
+        import threat_intel
+        skeys = threat_intel.load_keys()
+        if not skeys.get("URLSCAN_API_KEY"):
+            print("No URLSCAN_API_KEY in .env - skipping the page scan.")
+        else:
+            for r in results:
+                if r.verdict == SAFE:
+                    continue
+                real = refang(r.url) if "://" in refang(r.url) else "http://" + refang(r.url)
+                print(f"Scanning {r.host} in urlscan.io's sandbox (30-60 s)...", flush=True)
+                try:
+                    page = page_scan.scan_and_wait(real, skeys["URLSCAN_API_KEY"],
+                                                   skeys.get("URLSCAN_VISIBILITY", "unlisted"),
+                                                   progress=lambda: print("  still scanning...", flush=True))
+                    page_scan.apply_page(r, page, allowlist, skeys)
+                    r.reasons.append(f"Page scan report: https://urlscan.io/result/{page.uuid}/")
+                except page_scan.ScanError as e:
+                    r.reasons.append(f"Page scan: {e}")
 
     if args.explain:
         import explain

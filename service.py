@@ -120,3 +120,128 @@ def check_text(text: str) -> dict:
     links = extract_links(text)
     results = sorted((check_link(l) for l in links), key=lambda r: SEVERITY[r["verdict"]])  # worst first
     return {"found": len(links), "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Layer 5: page scan (started by the user with a button, takes 30-60 seconds)
+# ---------------------------------------------------------------------------
+
+import datetime as _dt
+
+import page_scan
+
+_jobs: dict[str, dict] = {}
+_shots: dict[str, bytes] = {}
+_daily = {"day": "", "count": 0}
+
+
+def page_scan_available() -> bool:
+    _setup()
+    return bool(_keys.get("URLSCAN_API_KEY"))
+
+
+def _daily_limit_reached() -> bool:
+    today = _dt.date.today().isoformat()
+    limit = int(_keys.get("URLSCAN_DAILY_LIMIT") or 50)
+    with _lock:
+        if _daily["day"] != today:
+            _daily.update(day=today, count=0)
+        if _daily["count"] >= limit:
+            return True
+        _daily["count"] += 1
+    return False
+
+
+def start_page_scan(link: str) -> dict:
+    """Submit the page to urlscan.io. Returns {"status": "pending", "scan_id"} or a final status."""
+    _setup()
+    key = refang(link).lower()
+    with _lock:
+        cached = _cache.get(key)
+    if not cached:                       # only links that were checked first can be scanned
+        cached = (time.time(), check_link(link))
+    base = cached[1]
+    if base["verdict"] == SAFE:
+        return {"status": "not_needed"}
+    if not page_scan_available():
+        return {"status": "unavailable"}
+    if _daily_limit_reached():
+        return {"status": "quota"}
+
+    real = refang(link)
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", real, re.I):
+        real = "http://" + real
+    try:
+        uid = page_scan.submit(real, _keys["URLSCAN_API_KEY"], _keys.get("URLSCAN_VISIBILITY", "unlisted"))
+    except page_scan.ScanError as e:
+        return {"status": e.kind, "message": str(e)}
+    with _lock:
+        _jobs[uid] = {"link": link, "real": real, "base": base, "started": time.time(), "done": None}
+    return {"status": "pending", "scan_id": uid}
+
+
+def poll_page_scan(uid: str) -> dict:
+    """Return {"status": "pending"} until ready, then the full updated result."""
+    with _lock:
+        job = _jobs.get(uid)
+    if not job:
+        return {"status": "unknown"}
+    if job["done"]:
+        return job["done"]
+    if time.time() - job["started"] < 8:          # urlscan never finishes faster than this
+        return {"status": "pending"}
+    if time.time() - job["started"] > page_scan.GIVE_UP_AFTER:
+        return {"status": "timeout", "message": "The page scan took too long. Try again later."}
+    try:
+        raw = page_scan.fetch_result(uid, _keys["URLSCAN_API_KEY"])
+    except page_scan.ScanError as e:
+        return {"status": e.kind, "message": str(e)}
+    if raw is None:
+        return {"status": "pending"}
+
+    page = page_scan.parse(uid, raw, page_scan.fetch_dom(uid, _keys["URLSCAN_API_KEY"]))
+    from link_checker import Result
+    base = job["base"]
+    r = Result(url=job["real"], host=base["host"], verdict=base["verdict"], reasons=list(base["evidence"]))
+    page_scan.apply_page(r, page, _allowlist, _keys)
+    exp = explain.explain(r, _keys)
+    done = {
+        **base,
+        "status": "done",
+        "verdict": r.verdict, "label": exp["label"], "en": exp["en"], "ar": exp["ar"],
+        "evidence": r.reasons,
+        "layers": [l for l in base["layers"] if "explanation" not in l.lower()]
+                  + ["Page scan (urlscan.io sandbox)",
+                     "AI explanation" if exp["source"] == "ai" else "Built-in explanation"],
+        "page": {
+            "final_link": explain.defang(page.final_url) if page.final_url else "",
+            "final_domain": page.final_domain,
+            "title": page.title,
+            "asks_for": page.asks_for,
+            "loaded": not (page.title and page_scan.ERROR_TITLE.search(page.title)),
+            "screenshot": f"/api/page-scan/{uid}/screenshot",
+            "report": f"https://urlscan.io/result/{uid}/",
+        },
+    }
+    with _lock:
+        job["done"] = done
+        _cache[refang(job["link"]).lower()] = (time.time(), {k: v for k, v in done.items() if k != "status"})
+        if len(_jobs) > 2000:
+            for k in sorted(_jobs, key=lambda k: _jobs[k]["started"])[:500]:
+                _jobs.pop(k, None)
+    return done
+
+
+def page_screenshot(uid: str) -> bytes | None:
+    if uid not in _jobs:
+        return None
+    with _lock:
+        if uid in _shots:
+            return _shots[uid]
+    img = page_scan.fetch_screenshot(uid, _keys["URLSCAN_API_KEY"])
+    if img:
+        with _lock:
+            _shots[uid] = img
+            if len(_shots) > 200:
+                _shots.pop(next(iter(_shots)))
+    return img

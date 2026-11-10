@@ -51,7 +51,8 @@ def load_keys(path: Path = ENV_FILE) -> dict:
             if line and not line.startswith("#") and "=" in line:
                 name, value = line.split("=", 1)
                 keys[name.strip()] = value.strip().strip('"').strip("'")
-    for name in ("VT_API_KEY", "GSB_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL"):     # environment variables also work
+    for name in ("VT_API_KEY", "GSB_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL",
+                 "URLSCAN_API_KEY", "URLSCAN_VISIBILITY", "URLSCAN_DAILY_LIMIT"):     # environment variables also work
         if os.environ.get(name):
             keys[name] = os.environ[name]
     return keys

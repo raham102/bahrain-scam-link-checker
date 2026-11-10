@@ -1,7 +1,7 @@
 # Bahrain Scam Link Checker
 
 **Try it live: [bahrain-scam-link-checker.onrender.com](https://bahrain-scam-link-checker.onrender.com)** (English and Arabic)
-<sub>Hosted on a free plan: if nobody has used it for 15 minutes, the first check takes about a minute while the server wakes up.</sub>
+<sub>Hosted on Render's free plan and kept awake by an UptimeRobot health check every 5 minutes, so it normally responds instantly.</sub>
 
 A tool that checks whether a link is a real Bahrain government or payment website, or a scam pretending to be one, and returns one of three verdicts:
 
@@ -46,7 +46,12 @@ The checker is built in layers. Each layer adds evidence before a final verdict 
   - Finds up to 3 links inside a pasted message (English or Arabic text), worst verdict first
   - Rate limit of 10 checks a minute per visitor and a 30-minute result cache, to protect the free API quotas
   - Fully right-to-left Arabic version; the link is never opened by the site
-- [ ] **Layer 5: Sandboxed page analysis** (screenshot, forms and content in an isolated browser)
+- [x] **Layer 5: Sandboxed page analysis** with [urlscan.io](https://urlscan.io). The page is opened in urlscan.io's own isolated browser, never on our server or the user's device:
+  - Follows redirects to the **real destination**, then runs Layer 1 and Layer 2 on it
+  - Reads the page title and a text snapshot of the page to spot forms asking for **card numbers, CVV, OTP codes, passwords or CPR numbers** (English and Arabic)
+  - Flags pages that present themselves as an official Bahrain service on an unofficial address
+  - Shows a **screenshot** of the page on the website, and explains dead pages ("may already have been taken down")
+  - Scans are **unlisted** (never public); started by the user with a button to save quota, with a daily cap
 
 ## Evaluation
 
@@ -71,7 +76,11 @@ Tested on **300 live phishing links** from the [OpenPhish public feed](https://g
 
 These links revealed a blind spot: scammers impersonate Bahraini **companies** (airlines, banks, couriers), not only ministries. Layer 1 now knows the real domains of commonly impersonated brands and flags look-alikes such as `gulfairsz[.]bond` and `ila-app[.]live`. It also flags domains that combine "bahrain" or "bh" with Bahrain's country code or a cheap ending (`bahrain-bhr[.]com`, `arxbh[.]cc`).
 
-The two links still marked Suspicious give nothing away in the URL. One looks like a private link shortener (`sw[.]run/xItjc`) and the other has never been scanned by any database. Without opening the page, "Suspicious" is the honest verdict, and the planned page-analysis layer targets these.
+The two links still marked Suspicious give nothing away in the URL. One looks like a private link shortener (`sw[.]run/xItjc`) and the other has never been scanned by any database.
+
+**What Layer 5 found:** the page scan revealed that `sw[.]run/xItjc` secretly **redirects to `bharamrt[.]cc`**, and that this destination no longer responds (HTTP 522), so it has probably been taken down. No security database knew either address, so the verdict stays **Suspicious**, now with the evidence to explain why. Layer 5 now also checks every hidden destination against Google Safe Browsing and VirusTotal, which turns such links into **Scam** whenever the destination is known.
+
+A rule I tried and rejected: treating domains that *start* with "bh" as Bahrain-targeting (to catch `bharamrt`) also flagged common names such as Bhatia and Bharat, so it was dropped. `bhatia[.]cc` is now part of the built-in tests to make sure it stays that way.
 
 - **No phishing link was ever marked safe**, and no official site was wrongly flagged.
 - None of the phishing links in this feed impersonated Bahrain sites, so Layer 1 correctly marked them "Suspicious" rather than guessing.
@@ -155,6 +164,14 @@ python build_popular_list.py            # refresh popular_domains.txt from Tranc
 python train_model.py --features host   # or --features full to reproduce the shortcut problem
 ```
 
+### Layer 5 setup (page scan)
+
+Add a free urlscan.io key (urlscan.io → Settings & API → New API key) to `.env` as `URLSCAN_API_KEY=...`, then:
+```bash
+python link_checker.py --intel --ml --scan --explain "https://suspicious-link.com"   # all 5 layers, ~30-60 s
+```
+On the website, Suspicious and Scam results show a **"Look inside the page safely"** button. Optional `.env` settings: `URLSCAN_VISIBILITY=unlisted` (default) or `private`, and `URLSCAN_DAILY_LIMIT=50`.
+
 ### Layer 4 setup (AI explanation)
 
 Add a free Gemini key from [Google AI Studio](https://aistudio.google.com/apikey) to `.env` as `GEMINI_API_KEY=...`, then:
@@ -194,6 +211,7 @@ Example output (all layers):
 | `model_report.md` | Training results, feature importance and limitations |
 | `app.py`, `service.py`, `static/index.html` | The website: FastAPI server, checking service and bilingual page |
 | `explain.py` | Layer 4: AI explanation with Gemini (English and Arabic), with fallbacks |
+| `page_scan.py` | Layer 5: sandboxed page analysis with urlscan.io |
 | `check_gemini.py` | Diagnostic: lists the Gemini models your key can use and tests them |
 | `bahrain_official_domains_allowlist.xlsx` | Verified official domains, matching rules and sources |
 | `evaluate.py` | Runs the checker on live phishing links and official sites and saves the results |
@@ -205,7 +223,7 @@ All example and test links in this repository are **defanged** (`hxxps://`, `[.]
 
 ## Tech stack
 
-Python · FastAPI · Google Gemini API · scikit-learn · pandas · NumPy · tldextract · python-whois · openpyxl · Google Safe Browsing API · VirusTotal API
+Python · FastAPI · Google Gemini API · urlscan.io API · scikit-learn · pandas · NumPy · tldextract · python-whois · openpyxl · Google Safe Browsing API · VirusTotal API
 
 ## Notes
 
@@ -215,4 +233,5 @@ Python · FastAPI · Google Gemini API · scikit-learn · pandas · NumPy · tld
 
 - PhiUSIIL Phishing URL Dataset: Prasad, A. & Chandra, S. (2024), UCI Machine Learning Repository, CC BY 4.0
 - [OpenPhish](https://openphish.com) public feed
+- [urlscan.io](https://urlscan.io) sandboxed page scans
 - [Tranco](https://tranco-list.eu) top-sites ranking
